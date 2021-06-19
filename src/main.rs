@@ -1,59 +1,36 @@
-mod config;
-mod user_config;
-mod redirect_uri;
-mod app;
-mod banner;
-mod cli;
-mod event;
-mod handlers;
-mod network;
-mod ui;
-mod cli_app;
+ mod app;
+ mod cli_app;
+ mod config;
+ mod network;
+ mod redirect_uri;
+ mod user_config;
 
-use config::ClientConfig;
-use user_config::UserConfig;
-use std::error::Error;
-use rspotify::{oauth2::SpotifyOAuth, util::{process_token, request_token}};
-use std::io;
-use redirect_uri::redirect_uri_web_server;
 use cli_app::CliApp;
-
-use crate::app::RouteId;
-use crate::event::Key;
-use anyhow::{anyhow, Result};
-use app::{ActiveBlock, App};
-use backtrace::Backtrace;
-use banner::BANNER;
-use clap::{App as ClapApp, Arg, Shell};
 use config::ClientConfig;
-use crossterm::{
-  cursor::MoveTo,
-  event::{DisableMouseCapture, EnableMouseCapture},
-  execute,
-  style::Print,
-  terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-  ExecutableCommand,
-};
-use network::{get_spotify, IoEvent, Network};
 use redirect_uri::redirect_uri_web_server;
 use rspotify::{
-  oauth2::{SpotifyOAuth, TokenInfo},
+  oauth2::SpotifyOAuth,
   util::{process_token, request_token},
 };
+use std::error::Error;
+use std::io;
+use user_config::UserConfig;
+
+use anyhow::Result;
+use app::App;
+
+use network::{get_spotify, IoEvent, Network};
+
+use rspotify::oauth2::TokenInfo;
 use std::{
   cmp::{max, min},
-  io::{self, stdout},
+  io::stdout,
   panic::{self, PanicInfo},
   path::PathBuf,
   sync::Arc,
   time::SystemTime,
 };
 use tokio::sync::Mutex;
-use tui::{
-  backend::{Backend, CrosstermBackend},
-  Terminal,
-};
-use user_config::{UserConfig, UserConfigPaths};
 
 #[derive(Debug)]
 pub enum Type {
@@ -104,7 +81,7 @@ pub async fn get_token_auto(spotify_oauth: &mut SpotifyOAuth, port: u16) -> Opti
 }
 
 #[tokio::main]
-async fn main() -> Result<(),Box <dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
   let song_name = "Anchor - Josh Garells";
   let mut user_config = UserConfig::new();
   user_config.load_config()?;
@@ -123,53 +100,54 @@ async fn main() -> Result<(),Box <dyn Error>> {
     .scope(&SCOPES.join(" "))
     .build();
 
-    let config_port = client_config.get_port();
+  let config_port = client_config.get_port();
 
-    match get_token_auto(&mut oauth, config_port).await {
-      Some(token_info) => {
-        let (sync_io_tx, sync_io_rx) = std::sync::mpsc::channel::<IoEvent>();
+  match get_token_auto(&mut oauth, config_port).await {
+    Some(token_info) => {
+      let (sync_io_tx, sync_io_rx) = std::sync::mpsc::channel::<IoEvent>();
 
-        let (spotify, token_expiry) = get_spotify(token_info);
+      let (spotify, token_expiry) = get_spotify(token_info);
 
-        // Initialise app state
-        let app = Arc::new(Mutex::new(App::new(
-              sync_io_tx,
-              user_config.clone(),
-              token_expiry,
-        )));
+      // Initialise app state
+      let app = Arc::new(Mutex::new(App::new(
+        sync_io_tx,
+        user_config.clone(),
+        token_expiry,
+      )));
 
-        let network = Network::new(oauth, spotify, client_config, &app);
-        let mut cli = CliApp::new(network, user_config);
+      let network = Network::new(oauth, spotify, client_config, &app);
+      let mut cli = CliApp::new(network, user_config);
 
-        cli.net.handle_network_event(IoEvent::GetDevices).await;
-        cli
-          .net
-          .handle_network_event(IoEvent::GetCurrentPlayback)
-          .await;
+      cli.net.handle_network_event(IoEvent::GetDevices).await;
+      cli
+        .net
+        .handle_network_event(IoEvent::GetCurrentPlayback)
+        .await;
 
+      let devices_list = match &cli.net.app.lock().await.devices {
+        Some(p) => p
+          .devices
+          .iter()
+          .map(|d| d.id.clone())
+          .collect::<Vec<String>>(),
+        None => Vec::new(),
+      };
 
-          let devices_list = match &cli.net.app.lock().await.devices {
-            Some(p) => p
-              .devices
-              .iter()
-              .map(|d| d.id.clone())
-              .collect::<Vec<String>>(),
-            None => Vec::new(),
-          };
-
-          // If the device_id is not specified, select the first available device
-          let device_id = cli.net.client_config.device_id.clone();
-          if device_id.is_none() || !devices_list.contains(&device_id.unwrap()) {
-            // Select the first device available
-            if let Some(d) = devices_list.get(0) {
-              cli.net.client_config.set_device_id(d.clone())?;
-            }
-          }
-          //arg3 will add to queue.!!!!!
-          cli.play(song_name.to_string(), Type::Track, false, false).await?;
+      // If the device_id is not specified, select the first available device
+      let device_id = cli.net.client_config.device_id.clone();
+      if device_id.is_none() || !devices_list.contains(&device_id.unwrap()) {
+        // Select the first device available
+        if let Some(d) = devices_list.get(0) {
+          cli.net.client_config.set_device_id(d.clone())?;
+        }
       }
-      None => println!("\nSpotify auth failed"),
+      //arg3 will add to queue.!!!!!
+      cli
+        .play(song_name.to_string(), Type::Track, false, false)
+        .await?;
     }
+    None => println!("\nSpotify auth failed"),
+  }
 
-    Ok(())
-} 
+  Ok(())
+}

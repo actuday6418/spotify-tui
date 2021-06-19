@@ -97,7 +97,7 @@ pub async fn handle_matches(
       if let Some(uri) = matches.value_of("uri") {
         cli.play_uri(uri.to_string(), queue, random).await;
       } else if let Some(name) = matches.value_of("name") {
-        println!("{:?}",matches);
+        println!("{:?}", matches);
         let category = Type::play_from_matches(matches);
         cli.play(name.to_string(), category, queue, random).await?;
       }
